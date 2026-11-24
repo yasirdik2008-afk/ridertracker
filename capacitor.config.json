@@ -1,0 +1,8 @@
+{
+  "appId": "com.rider.tracker",
+  "appName": "Rider",
+  "webDir": "www",
+  "plugins": {
+    "CapacitorHttp": { "enabled": true }
+  }
+}

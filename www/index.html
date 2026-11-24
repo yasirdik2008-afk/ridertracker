@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ur">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rider</title>
+<style>
+:root{--ink:#1d2a2a;--mut:#667574;--line:#d9e0df;--bg:#f4f7f6;--card:#fff;--acc:#0f766e;--bad:#b91c1c}
+@media (prefers-color-scheme:dark){:root{--ink:#e6efee;--mut:#93a5a3;--line:#2c3b3a;--bg:#121b1b;--card:#1a2625;--acc:#2dd4bf;--bad:#f87171}}
+*{box-sizing:border-box}
+body{margin:0;font:17px/1.45 system-ui,sans-serif;color:var(--ink);background:var(--bg);padding:16px;padding-top:max(16px,env(safe-area-inset-top));max-width:480px;margin:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+h1{font-size:20px;margin:0 0 12px}
+input,button{font:inherit;width:100%;padding:12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);margin-bottom:10px}
+button{background:var(--acc);color:#fff;border:0;font-weight:700}
+button.off{background:var(--bad)}button.s{background:var(--bg);color:var(--ink);border:1px solid var(--line);width:auto;padding:6px 12px;margin:0}
+.m{color:var(--mut);font-size:14px}.err{color:var(--bad)}
+.o{padding:10px 0;border-top:1px solid var(--line)}.o:first-child{border-top:0}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+</style>
+</head>
+<body>
+<div id="lg" class="card" hidden>
+  <h1>Rider login</h1>
+  <input id="ph" placeholder="Phone number" inputmode="tel" autocomplete="username">
+  <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+  <button id="lb">Login</button><div id="le" class="err"></div>
+</div>
+<div id="mn" hidden>
+  <div class="card">
+    <div class="top"><h1 id="nm" style="margin:0"></h1><button class="s" id="lo">Logout</button></div>
+    <button id="go">Delivery start karein</button>
+    <div id="st" class="m">Band hai. Kaam shuru karte waqt "Delivery start" dabayein.</div>
+  </div>
+  <div class="card"><h1>Mere orders</h1><div id="ol" class="m">Abhi koi order nahi.</div></div>
+</div>
+<script src="config.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const BG=window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins.BackgroundGeolocation;
+let token=localStorage.getItem('tk')||'',wid=null,timer=null,last=null,lastSent=0,sending=false;
+
+async function call(a,d){
+  try{
+    const r=await fetch(SERVER+'api.php?a='+a+'&i=1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
+    const t=await r.text();
+    try{return {status:r.status,...JSON.parse(t)}}catch(e){return {status:0,error:'Server ne sahi jawab nahi diya. Internet aur config.js ka address check karein.'}}
+  }catch(e){return {status:0,error:'Internet nahi hai.'}}
+}
+function show(){const on=!!token;$('lg').hidden=on;$('mn').hidden=!on;if(on)$('nm').textContent=localStorage.getItem('nm')||'Rider'}
+show();
+
+$('lb').onclick=async()=>{
+  $('le').textContent='';
+  const r=await call('rider_login',{phone:$('ph').value,pass:$('pw').value});
+  if(!r.token){$('le').textContent=r.error||'Login nahi hua';return}
+  token=r.token;localStorage.setItem('tk',token);localStorage.setItem('nm',r.name);show();
+};
+$('lo').onclick=()=>{stop();token='';localStorage.removeItem('tk');show()};
+$('go').onclick=()=>wid===null?start():stop();
+
+async function start(){
+  if(!BG){$('st').innerHTML='<span class="err">Ye app sirf APK ke andar chalti hai.</span>';return}
+  $('st').textContent='Location dhoondh rahe hain...';
+  wid=await BG.addWatcher(
+    {backgroundTitle:'Delivery chal rahi hai',backgroundMessage:'Aap ki location malik ko bheji ja rahi hai',requestPermissions:true,stale:false,distanceFilter:0},
+    (loc,err)=>{
+      if(err){
+        if(err.code==='NOT_AUTHORIZED'){$('st').innerHTML='<span class="err">Location ki ijazat chahiye. Settings mein Location ko "Hamesha allow" karein.</span>';if(confirm('Location ki ijazat nahi hai. Settings kholein?'))BG.openSettings()}
+        return;
+      }
+      last=loc;if(Date.now()-lastSent>10000)send();
+    });
+  timer=setInterval(()=>{if(last&&Date.now()-lastSent>10000)send()},10000);
+  $('go').textContent='Delivery band karein';$('go').className='off';
+}
+function stop(){
+  if(wid!==null){BG.removeWatcher({id:wid});wid=null}
+  clearInterval(timer);last=null;
+  $('go').textContent='Delivery start karein';$('go').className='';$('st').textContent='Band hai.';
+}
+async function send(){
+  if(sending||!last)return;sending=true;lastSent=Date.now();
+  const r=await call('ping',{token,lat:last.latitude,lng:last.longitude});
+  if(r.status===401){$('lo').click()}
+  else if(r.ok){$('st').textContent='Location ja rahi hai. Aakhri: '+new Date().toLocaleTimeString();render(r.orders)}
+  else $('st').innerHTML='<span class="err">'+esc(r.error||'Masla aaya')+'</span>';
+  sending=false;
+}
+function render(o){$('ol').innerHTML=o.length?o.map(x=>`<div class="o"><b>${esc(x.customer)}</b><div class="m">${esc(x.address)}</div></div>`).join(''):'Abhi koi order nahi.'}
+</script>
+</body>
+</html>
